@@ -8,6 +8,12 @@ from tqdm import tqdm
 from trt_engine import TensorRTInfer
 
 
+def batch(iterable, n=1):
+    l = len(iterable)
+    for ndx in range(0, l, n):
+        yield iterable[ndx : min(ndx + n, l)]
+
+
 class YOLOv8:
     def __init__(
         self,
@@ -38,17 +44,10 @@ class YOLOv8:
             blobs[i] = blob
 
         result = np.zeros((len(imgs), *self.output_spec[1:]), dtype=np.float32)
-        for i, b in tqdm(enumerate(self.batch(blobs, self.bs))):
-            result[self.bs * i : self.bs * (i + 1)] = self.model.infer(
-                np.vstack(b), len(b)
-            )
+        for i, b in tqdm(enumerate(batch(blobs, self.bs))):
+            result[self.bs * i : self.bs * (i + 1)] = self.model.infer(b, len(b))
 
         return self.postprocess(result, shapes)
-
-    def batch(self, iterable, n=1):
-        l = len(iterable)
-        for ndx in range(0, l, n):
-            yield iterable[ndx : min(ndx + n, l)]
 
     def preprocess(self, image_path: str, index: int):
         img = cv2.imread(image_path)
@@ -62,11 +61,13 @@ class YOLOv8:
         return blob, (shape[0], shape[1]), index
 
     def letterbox(self, img: np.ndarray) -> np.ndarray:
-        scale = min((640.0 / img.shape[0]), (640.0 / img.shape[1]))
+        scale = min(
+            (self.intput_spec[2] / img.shape[0]), (self.intput_spec[3] / img.shape[1])
+        )
         new_h = round(img.shape[0] * scale)
         new_w = round(img.shape[1] * scale)
-        pad_h = (640 - new_h) / 2
-        pad_w = (640 - new_w) / 2
+        pad_h = (self.intput_spec[2] - new_h) / 2
+        pad_w = (self.intput_spec[3] - new_w) / 2
         top = round(pad_h - 0.1)
         left = round(pad_w - 0.1)
         bottom = round(pad_h + 0.1)
@@ -80,13 +81,13 @@ class YOLOv8:
     def postprocess(self, result: np.ndarray, shapes: np.ndarray) -> list:
         gain = 640.0 / shapes
         gain = np.min(gain, axis=1)
-        pad_w = np.round(640.0 - shapes[:, 0] * gain) / 2 - 0.1
-        pad_h = np.round(640.0 - shapes[:, 1] * gain) / 2 - 0.1
+        pad_h = np.round(self.intput_spec[2] - shapes[:, 0] * gain) / 2 - 0.1
+        pad_w = np.round(self.intput_spec[3] - shapes[:, 1] * gain) / 2 - 0.1
 
         # reshape for broadcasting
         gain = gain.reshape(len(shapes), 1, 1)
-        pad_w = pad_w.reshape(len(shapes), 1, 1)
         pad_h = pad_h.reshape(len(shapes), 1, 1)
+        pad_w = pad_w.reshape(len(shapes), 1, 1)
 
         p = np.empty_like(result)
         dw = result[:, 2, :] / 2
@@ -97,8 +98,8 @@ class YOLOv8:
         p[:, 3, :] = result[:, 1, :] + dh
         p[:, 4, :] = result[:, 4, :]
 
-        p[:, [0, 2], :] -= pad_h
-        p[:, [1, 3], :] -= pad_w
+        p[:, [0, 2], :] -= pad_w
+        p[:, [1, 3], :] -= pad_h
         p[:, [0, 1, 2, 3], :] /= gain
         p[:, [0, 2], :] = np.clip(
             p[:, [0, 2], :], 0, shapes[:, 1].reshape(len(shapes), 1, 1)
@@ -140,17 +141,10 @@ class R50Model:
             blobs[i] = blob
 
         result = np.zeros((len(imgs), 512), dtype=np.float32)
-        for i, b in tqdm(enumerate(self.batch(blobs, self.bs))):
-            result[self.bs * i : self.bs * (i + 1)] = self.model.infer(
-                np.vstack(b), len(b)
-            )
+        for i, b in tqdm(enumerate(batch(blobs, self.bs))):
+            result[self.bs * i : self.bs * (i + 1)] = self.model.infer(b, len(b))
 
         return result
-
-    def batch(self, iterable, n=1):
-        l = len(iterable)
-        for ndx in range(0, l, n):
-            yield iterable[ndx : min(ndx + n, l)]
 
     def preprocess(self, image_path: str, index: int):
         img = cv2.imread(image_path)
