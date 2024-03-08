@@ -1,10 +1,10 @@
-import cv2
-import numpy as np
 import os
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import cv2
+import numpy as np
 from tqdm import tqdm
+
 from trt_engine import TensorRTInfer
 
 
@@ -33,10 +33,7 @@ class YOLOv8:
         blobs = np.zeros((len(imgs), *self.intput_spec[1:]), dtype=np.float32)
         shapes = np.zeros((len(imgs), 2), dtype=np.int32)
 
-        num_workers = os.cpu_count()
-        if num_workers is None:
-            raise RuntimeError("Unable to determine number of CPU cores")
-        executor = ThreadPoolExecutor(int(num_workers / 2))
+        executor = ThreadPoolExecutor(8)
         jobs = [executor.submit(self.preprocess, img, i) for i, img in enumerate(imgs)]
         for job in as_completed(jobs):
             blob, shape, i = job.result()
@@ -44,7 +41,7 @@ class YOLOv8:
             blobs[i] = blob
 
         result = np.zeros((len(imgs), *self.output_spec[1:]), dtype=np.float32)
-        for i, b in tqdm(enumerate(batch(blobs, self.bs))):
+        for i, b in enumerate(batch(blobs, self.bs)):
             result[self.bs * i : self.bs * (i + 1)] = self.model.infer(b, len(b))
 
         return self.postprocess(result, shapes)
